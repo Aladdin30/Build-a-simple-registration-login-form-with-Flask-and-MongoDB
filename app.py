@@ -1,127 +1,98 @@
+from flask import Flask,render_template,session,request,url_for,redirect
 import pymongo
+import bcrypt
+app=Flask(__name__)
 
-myclient=pymongo.MongoClient("mongodb://localhost:27017")
+app.secret_key="testing"
+clint=pymongo.MongoClient("mongodb://localhost:27017")
+db=clint["login"]
+records=db['users']
 
-db=myclient["company"]
-col=db['customer']
+@app.route("/", methods=['post', 'get'])
+def index():
+    message = ''
+    #if method post in index
+    if "email" in session:
+        return redirect(url_for("logged_in"))
+    if request.method == "POST":
+        user = request.form.get("fullname")
+        email = request.form.get("email")
+        password1 = request.form.get("password1")
+        password2 = request.form.get("password2")
+        #if found in database showcase that it's found 
+        user_found = records.find_one({"name": user})
+        email_found = records.find_one({"email": email})
+        if user_found:
+            message = 'There already is a user by that name'
+            return render_template('index.html', message=message)
+        if email_found:
+            message = 'This email already exists in database'
+            return render_template('index.html', message=message)
+        if password1 != password2:
+            message = 'Passwords should match!'
+            return render_template('index.html', message=message)
+        else:
+            #hash the password and encode it
+            hashed = bcrypt.hashpw(password2.encode('utf-8'), bcrypt.gensalt())
+            #assing them in a dictionary in key value pairs
+            user_input = {'name': user, 'email': email, 'password': hashed}
+            #insert it in the record collection
+            records.insert_one(user_input)
+            
+            #find the new created account and its email
+            user_data = records.find_one({"email": email})
+            new_email = user_data['email']
+            #if registered redirect to logged in as the registered user
+            return render_template('logged_in.html', email=new_email)
+    return render_template('index.html')
 
-print(myclient.list_database_names())
-print(db.list_collection_names())
-#--------------------to insert one---------------
-# info={"name":"shady","address":"Alex"}
-# x=col.insert_one(info)
-# for n in col.find({},{ "address": 0 }):
-#     print(n)
-#--------------------to insert many--------------
+@app.route("/login", methods=["POST", "GET"])
+def login():
+    message = 'Please login to your account'
+    if "email" in session:
+        return redirect(url_for("logged_in"))
 
-# mylist = [
-#     { "name": "Amy", "address": "Apple st 652"},
-#     { "name": "Hannah", "address": "Mountain 21"},
-#     { "name": "Michael", "address": "Valley 345"},
-#     { "name": "Sandy", "address": "Ocean blvd 2"},
-#     { "name": "Betty", "address": "Green Grass 1"},
-#     { "name": "Richard", "address": "Sky st 331"},
-#     { "name": "Susan", "address": "One way 98"},
-#     { "name": "Vicky", "address": "Yellow Garden 2"},
-#     { "name": "Ben", "address": "Park Lane 38"},
-#     { "name": "William", "address": "Central st 954"},
-#     { "name": "Chuck", "address": "Main Road 989"},
-#     { "name": "Viola", "address": "Sideway 1633"}
-# ]
-# x=col.insert_many(mylist)
+    if request.method == "POST":
+        email = request.form.get("email")
+        password = request.form.get("password")
 
-#--------------------to find one--------------
+        #check if email exists in database
+        email_found = records.find_one({"email": email})
+        if email_found:
+            email_val = email_found['email']
+            passwordcheck = email_found['password']
+            #encode the password and check if it matches
+            if bcrypt.checkpw(password.encode('utf-8'), passwordcheck):
+                session["email"] = email_val
+                return redirect(url_for('logged_in'))
+            else:
+                if "email" in session:
+                    return redirect(url_for("logged_in"))
+                message = 'Wrong password'
+                return render_template('login.html', message=message)
+        else:
+            message = 'Email not found'
+            return render_template('login.html', message=message)
+    return render_template('login.html', message=message)
 
-# x = col.find_one() #this will return the first one 
-# print(x)
+@app.route('/logged_in')
+def logged_in():
+    if "email" in session:
+        email = session["email"]
+        return render_template('logged_in.html', email=email)
+    else:
+        return redirect(url_for("login"))
 
-#--------------------to find many--------------
+@app.route("/logout", methods=["POST", "GET"])
+def logout():
+    if "email" in session:
+        session.pop("email", None)
+        return render_template("signout.html")
+    else:
+        return render_template('index.html')
 
-# for x in col.find():
-#     print(x)
 
-#--------------------to find many--------------
-# 0 means will not appear 1 means will appear
 
-# for x in col.find({},{ "_id": 0, "name": 1, "address": 1 }):
-#     print(x)
 
-#--------------------Filter the Result--------------
-
-# myquery = { "address": "Park Lane 38" }
-
-# mydoc = col.find(myquery)
-
-# for x in mydoc:
-#     print(x)
-    
-#--------------------Find documents where the address starts with the letter "S" or higher--------------
-#use the greater than modifier: {"$gt": "S"}:
-
-# myquery = { "address": {"$gt": "Park Lane 38" }}
-# x=col.find(myquery)
-# for r in x:
-#     print(r)
-    
-#--------------------Find documents where the address starts with the letter "S"--------------
-
-# myquery = { "address": { "$regex": "^S" } }
-# mydoc = col.find(myquery)
-# for x in mydoc:
-#     print(x)
-
-#--------------------Sort the result alphabetically by name:--------------
-
-# mydoc = col.find().sort("name")
-# for x in mydoc:
-#     print(x)
-
-#--------------------Sort the result reverse alphabetically by name:--------------
-
-# mydoc = col.find().sort("name", -1)
-# for x in mydoc:
-#     print(x)
-    
-#--------------------Delete the document with the address "Mountain 21"--------------
-
-# myquery = { "address": "Mountain 21" }
-# col.delete_one(myquery)
-
-#--------------------Delete all documents were the address starts with the letter S--------------
-
-# myquery = { "address": {"$regex": "^S"} }
-# x = col.delete_many(myquery)
-# print(x.deleted_count, " documents deleted.")
-
-#--------------------Delete all documents in the "customers" collection:--------------
-
-# x = col.delete_many({})
-# print(x.deleted_count, " documents deleted.")
-
-#--------------------Delete the "customers" collection:--------------
-
-# col.drop()
-
-#--------------------Change the address from "Valley 345" to "Canyon 123":--------------
-
-# myquery = { "address": "Valley 345" }
-# newvalues = { "$set": { "address": "Canyon 123" } }
-# col.update_one(myquery, newvalues)
-# #print "customers" after the update:
-# for x in col.find():
-#     print(x)
-
-#--------------------Update all documents where the address starts with the letter "S":--------------
-
-# myquery = { "address": { "$regex": "^S" } }
-# newvalues = { "$set": { "name": "Minnie" } }
-# x = col.update_many(myquery, newvalues)
-# print(x.modified_count, "documents updated.")
-
-#--------------------Limit the result to only return 5 documents:--------------
-
-myresult = col.find().limit(5)
-#print the result:
-for x in myresult:
-    print(x)
-
+if __name__ == "__main__":
+    app.run(debug=True, host='0.0.0.0', port=5000)
